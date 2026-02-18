@@ -416,5 +416,122 @@ app.post('/api/bookings/:id/review', auth, (req, res) => {
   res.status(201).json({ message: '¡Reseña publicada!' });
 });
 
+// ── LISTA DE ESPERA ───────────────────────────────────────────────────
+app.post('/api/waitlist', async (req, res) => {
+  const { name, email, category, city, monthly_bookings, monthly_cancellations, avg_price, main_barrier, willingness_to_pay, comments } = req.body;
+  
+  if (!name || !email || !category) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios' });
+  }
+
+  // Guardamos en la tabla de businesses con password temporal
+  try {
+    const hashedPassword = bcrypt.hashSync('waitlist_' + Date.now(), 10);
+    db.prepare(
+      'INSERT INTO businesses (name, email, password, category, zone, description) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(
+      name,
+      email,
+      hashedPassword,
+      category,
+      city || '',
+      `LISTA_ESPERA: ${JSON.stringify({ monthly_bookings, monthly_cancellations, avg_price, main_barrier, willingness_to_pay, comments })}`
+    );
+  } catch (err) {
+    // Si el email ya existe, lo ignoramos silenciosamente
+    console.log('Email duplicado en lista de espera:', email);
+  }
+
+  // Email al negocio
+  await sendEmail(
+    email,
+    '¡Estás en la lista de HOURFIX!',
+    `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h1 style="color: #D86018;">¡Bienvenido a HOURFIX, ${name}!</h1>
+      <p>Has sido añadido a nuestra lista de espera para el lanzamiento en <strong>${city || 'Gijón/Oviedo'}</strong>.</p>
+      <p><strong>Te contactaremos antes del lanzamiento</strong> para darte acceso prioritario y configurar tu perfil.</p>
+      <h3 style="color: #D86018; margin-top: 2rem;">¿Qué puedes esperar?</h3>
+      <ul style="line-height: 1.8;">
+        <li>💰 <strong>Recupera el dinero de cancelaciones</strong> — Cobramos automáticamente el 50% si cancelan con menos de 24h</li>
+        <li>📅 <strong>Solo tus huecos libres</strong> — Tus clientes habituales siguen como siempre</li>
+        <li>🎯 <strong>Clientes nuevos verificados</strong> — Sin curiosos ni no-shows</li>
+        <li>📍 <strong>Top posición garantizada</strong> — Los primeros registros aparecen siempre arriba</li>
+      </ul>
+      <p style="margin-top: 2rem; color: #666; font-size: 0.9rem;">Si no solicitaste esto, ignora este email.</p>
+    </div>
+    `
+  );
+
+  // Email al admin (con datos limpios)
+  await sendEmail(
+    ADMIN_EMAIL,
+    `🔔 Lista de espera: ${name} (${category})`,
+    `
+    <div style="font-family: Arial, sans-serif;">
+      <h2 style="color: #D86018;">Nuevo negocio en lista de espera</h2>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 2rem;">
+        <tr style="background: #FFF8F0;">
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Nombre</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${name}</td>
+        </tr>
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Email</td>
+          <td style="padding: 12px; border: 1px solid #ddd;"><a href="mailto:${email}">${email}</a></td>
+        </tr>
+        <tr style="background: #FFF8F0;">
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Categoría</td>
+          <td style="padding: 12px; border: 1px solid #ddd;"><strong>${category}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Ciudad</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${city || 'No especificada'}</td>
+        </tr>
+      </table>
+
+      <h3 style="color: #D86018;">📊 Datos de negocio</h3>
+      <table style="border-collapse: collapse; width: 100%; margin-bottom: 2rem;">
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Citas al mes</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${monthly_bookings || 'No respondió'}</td>
+        </tr>
+        <tr style="background: #FFEBEE;">
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Cancelaciones al mes</td>
+          <td style="padding: 12px; border: 1px solid #ddd;"><strong style="color: #C62828;">${monthly_cancellations || 'No respondió'}</strong></td>
+        </tr>
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Precio medio servicio</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${avg_price || 'No respondió'}</td>
+        </tr>
+      </table>
+
+      <h3 style="color: #D86018;">💭 Interés y barreras</h3>
+      <table style="border-collapse: collapse; width: 100%;">
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Principal barrera</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${main_barrier || 'No respondió'}</td>
+        </tr>
+        <tr style="background: #E8F5E9;">
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Dispuesto a pagar</td>
+          <td style="padding: 12px; border: 1px solid #ddd;"><strong style="color: #2E7D32;">${willingness_to_pay || 'No respondió'}</strong></td>
+        </tr>
+        ${comments ? `
+        <tr>
+          <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold; vertical-align: top;">Comentarios</td>
+          <td style="padding: 12px; border: 1px solid #ddd;">${comments}</td>
+        </tr>
+        ` : ''}
+      </table>
+
+      <p style="margin-top: 20px; color: #666; font-size: 0.9rem;">
+        Registrado el ${new Date().toLocaleString('es-ES')}
+      </p>
+    </div>
+    `
+  );
+
+  res.status(201).json({ message: 'Añadido a la lista de espera' });
+});
+
 // ── ARRANCAR ──────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`⏳ HOURFIX API corriendo en puerto ${PORT}`));
